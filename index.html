@@ -204,8 +204,8 @@
   <div class="wrap">
     <header>
       <div>
-        <h1>Monitor Daya PZEM</h1>
-        <div class="subtitle">Data dari Adafruit IO</div>
+        <h1>HOME POWER MONITORING</h1>
+        <div class="subtitle">ESP32</div>
       </div>
       <div class="status">
         <span class="dot" id="statusDot"></span>
@@ -216,8 +216,8 @@
     <div class="panels">
       <div class="panel" id="panelA">
         <div class="panel-head">
-          <h2>Jalur A</h2>
-          <span class="addr">alamat 0x01</span>
+          <h2>HOME 1</h2>
+          <span class="addr">PZEM01</span>
         </div>
         <div class="metrics">
           <div class="metric">
@@ -246,7 +246,7 @@
           </div>
         </div>
         <div class="spark">
-          <div class="label">Daya, riwayat terbaru</div>
+          <div class="label">History</div>
           <svg class="spark-line" viewBox="0 0 300 40" preserveAspectRatio="none">
             <polyline id="a-spark" fill="none" stroke="#1F5C4D" stroke-width="1.6" points="" />
           </svg>
@@ -254,14 +254,14 @@
       </div>
 
       <div class="panel placeholder" id="panelB">
-        Jalur B belum dipasang.<br>Tambahkan sensor kedua dengan address berbeda untuk mengaktifkan panel ini.
+        HOME 2 Not Connect.<br>Tambahkan sensor kedua dengan address berbeda untuk mengaktifkan panel ini.
       </div>
     </div>
 
     <footer>
-      <div>Sumber data: <span class="ink">Adafruit IO / feed jalur-a</span></div>
-      <div>Pembaruan terakhir: <span class="ink" id="lastUpdate">–</span></div>
-      <div>Interval polling: <span class="ink">5 detik</span></div>
+      <div>Source: <span class="ink">Feed Line A</span></div>
+      <div>Last Updated: <span class="ink" id="lastUpdate">–</span></div>
+      <div>Interval polling: <span class="ink">5s</span></div>
     </footer>
   </div>
 
