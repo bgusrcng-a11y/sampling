@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Monitor Daya PZEM</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #EBEAE4;
+    --surface: #FFFFFF;
+    --line: #D2D0C7;
+    --ink: #1C1E1B;
+    --muted: #6B6D66;
+    --accent: #1F5C4D;
+    --alert: #A63D2C;
+    --offline: #8A8A82;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: 'IBM Plex Sans', sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 920px;
+    margin: 0 auto;
+    padding: 28px 20px 60px;
+  }
+
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 24px;
+  }
+
+  h1 {
+    font-size: 19px;
+    font-weight: 600;
+    margin: 0;
+    letter-spacing: -0.01em;
+  }
+
+  .subtitle {
+    font-size: 13px;
+    color: var(--muted);
+    margin-top: 3px;
+  }
+
+  .status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+
+  .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+
+  .dot.live { animation: pulse 2.4s ease-in-out infinite; }
+  .dot.offline { background: var(--offline); animation: none; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .dot.live { animation: none; }
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.35; }
+  }
+
+  .panels {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+
+  @media (max-width: 680px) {
+    .panels { grid-template-columns: 1fr; }
+  }
+
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    padding: 20px;
+  }
+
+  .panel.placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--muted);
+    font-size: 13px;
+    min-height: 200px;
+    text-align: center;
+  }
+
+  .panel-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 18px;
+  }
+
+  .panel-head h2 {
+    font-size: 15px;
+    font-weight: 600;
+    margin: 0;
+  }
+
+  .addr {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  .metrics {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px 12px;
+  }
+
+  .metric {
+    border-top: 1px solid var(--line);
+    padding-top: 8px;
+  }
+
+  .metric .label {
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 4px;
+  }
+
+  .metric .value {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 22px;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+  }
+
+  .metric .value.hero {
+    font-size: 28px;
+    color: var(--accent);
+  }
+
+  .metric .unit {
+    font-size: 13px;
+    color: var(--muted);
+    font-weight: 400;
+    margin-left: 2px;
+  }
+
+  .flag {
+    display: inline-block;
+    margin-top: 6px;
+    font-size: 11.5px;
+    color: var(--alert);
+  }
+
+  .spark {
+    margin-top: 18px;
+    padding-top: 14px;
+    border-top: 1px solid var(--line);
+  }
+
+  .spark .label {
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+
+  svg.spark-line { display: block; width: 100%; height: 40px; }
+
+  footer {
+    margin-top: 20px;
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding-top: 16px;
+    border-top: 1px solid var(--line);
+    font-size: 12.5px;
+    color: var(--muted);
+  }
+
+  footer span.ink { color: var(--ink); font-family: 'IBM Plex Mono', monospace; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div>
+        <h1>Monitor Daya PZEM</h1>
+        <div class="subtitle">Data dari Adafruit IO</div>
+      </div>
+      <div class="status">
+        <span class="dot" id="statusDot"></span>
+        <span id="statusText">Memuat...</span>
+      </div>
+    </header>
+
+    <div class="panels">
+      <div class="panel" id="panelA">
+        <div class="panel-head">
+          <h2>Jalur A</h2>
+          <span class="addr">alamat 0x01</span>
+        </div>
+        <div class="metrics">
+          <div class="metric">
+            <div class="label">Tegangan</div>
+            <div class="value" id="a-v">–<span class="unit">V</span></div>
+          </div>
+          <div class="metric">
+            <div class="label">Arus</div>
+            <div class="value" id="a-i">–<span class="unit">A</span></div>
+          </div>
+          <div class="metric">
+            <div class="label">Daya aktif</div>
+            <div class="value hero" id="a-p">–<span class="unit">W</span></div>
+          </div>
+          <div class="metric">
+            <div class="label">Faktor daya</div>
+            <div class="value" id="a-pf">–</div>
+          </div>
+          <div class="metric">
+            <div class="label">Frekuensi</div>
+            <div class="value" id="a-freq">–<span class="unit">Hz</span></div>
+          </div>
+          <div class="metric">
+            <div class="label">Energi total</div>
+            <div class="value" id="a-energy">–<span class="unit">Wh</span></div>
+          </div>
+        </div>
+        <div class="spark">
+          <div class="label">Daya, riwayat terbaru</div>
+          <svg class="spark-line" viewBox="0 0 300 40" preserveAspectRatio="none">
+            <polyline id="a-spark" fill="none" stroke="#1F5C4D" stroke-width="1.6" points="" />
+          </svg>
+        </div>
+      </div>
+
+      <div class="panel placeholder" id="panelB">
+        Jalur B belum dipasang.<br>Tambahkan sensor kedua dengan address berbeda untuk mengaktifkan panel ini.
+      </div>
+    </div>
+
+    <footer>
+      <div>Sumber data: <span class="ink">Adafruit IO / feed jalur-a</span></div>
+      <div>Pembaruan terakhir: <span class="ink" id="lastUpdate">–</span></div>
+      <div>Interval polling: <span class="ink">5 detik</span></div>
+    </footer>
+  </div>
+
+<script>
+  const POLL_MS = 5000;
+  const statusDot = document.getElementById('statusDot');
+  const statusText = document.getElementById('statusText');
+  const lastUpdateEl = document.getElementById('lastUpdate');
+
+  function setOnline(isOnline) {
+    statusDot.className = 'dot ' + (isOnline ? 'live' : 'offline');
+    statusText.textContent = isOnline ? 'Terhubung' : 'Tidak ada data terbaru';
+  }
+
+  function buildSparkPoints(values) {
+    if (values.length < 2) return '';
+    const max = Math.max(...values);
+    const min = Math.min(...values);
+    const range = (max - min) || 1;
+    const stepX = 300 / (values.length - 1);
+    return values
+      .map((v, i) => {
+        const x = i * stepX;
+        const y = 36 - ((v - min) / range) * 30;
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+      })
+      .join(' ');
+  }
+
+  async function refresh() {
+    try {
+      const res = await fetch('/api/feed?feed=jalur-a&limit=20');
+      const rows = await res.json();
+
+      if (!Array.isArray(rows) || rows.length === 0) {
+        setOnline(false);
+        return;
+      }
+
+      // Data Adafruit IO urut dari terbaru -> terlama
+      const latest = JSON.parse(rows[0].value);
+
+      document.getElementById('a-v').innerHTML = `${latest.v.toFixed(2)}<span class="unit">V</span>`;
+      document.getElementById('a-i').innerHTML = `${latest.i.toFixed(3)}<span class="unit">A</span>`;
+      document.getElementById('a-p').innerHTML = `${latest.p.toFixed(1)}<span class="unit">W</span>`;
+      document.getElementById('a-pf').textContent = latest.pf.toFixed(2);
+      document.getElementById('a-freq').innerHTML = `${latest.freq.toFixed(1)}<span class="unit">Hz</span>`;
+      document.getElementById('a-energy').innerHTML = `${latest.energy}<span class="unit">Wh</span>`;
+
+      const powerHistory = rows
+        .map(r => { try { return JSON.parse(r.value).p; } catch { return null; } })
+        .filter(v => v !== null)
+        .reverse();
+
+      document.getElementById('a-spark').setAttribute('points', buildSparkPoints(powerHistory));
+
+      lastUpdateEl.textContent = new Date().toLocaleTimeString('id-ID');
+      setOnline(true);
+    } catch (err) {
+      console.error(err);
+      setOnline(false);
+    }
+  }
+
+  refresh();
+  setInterval(refresh, POLL_MS);
+</script>
+</body>
+</html>
