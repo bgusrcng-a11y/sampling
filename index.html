@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Monitor Daya PZEM</title>
+<title>POWER MONITORING</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
@@ -16,6 +16,7 @@
     --accent: #1F5C4D;
     --alert: #A63D2C;
     --offline: #8A8A82;
+    --radius: 10px;
   }
 
   * { box-sizing: border-box; }
@@ -96,6 +97,7 @@
   .panel {
     background: var(--surface);
     border: 1px solid var(--line);
+    border-radius: var(--radius);
     padding: 20px;
   }
 
@@ -128,6 +130,20 @@
     color: var(--muted);
   }
 
+  .panel-title { display: flex; flex-direction: column; gap: 5px; }
+
+  .mod-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  .mod-status .dot { width: 6px; height: 6px; }
+  .mod-status.aktif { color: var(--accent); }
+  .mod-status.mati { color: var(--offline); }
+
   .metrics {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -135,8 +151,9 @@
   }
 
   .metric {
-    border-top: 1px solid var(--line);
-    padding-top: 8px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 10px 12px;
   }
 
   .metric .label {
@@ -204,7 +221,7 @@
   <div class="wrap">
     <header>
       <div>
-        <h1>HOME POWER MONITORING</h1>
+        <h1>Monitor Daya PZEM</h1>
         <div class="subtitle">ESP32</div>
       </div>
       <div class="status">
@@ -216,7 +233,13 @@
     <div class="panels">
       <div class="panel" id="panelA">
         <div class="panel-head">
-          <h2>HOME 1</h2>
+          <div class="panel-title">
+            <h2>HOME 1</h2>
+            <span class="mod-status" id="a-modstatus">
+              <span class="dot"></span>
+              <span id="a-modstatus-text">Memuat...</span>
+            </span>
+          </div>
           <span class="addr">PZEM01</span>
         </div>
         <div class="metrics">
@@ -254,13 +277,13 @@
       </div>
 
       <div class="panel placeholder" id="panelB">
-        HOME 2 Not Connect.<br>Tambahkan sensor kedua dengan address berbeda untuk mengaktifkan panel ini.
+        Jalur B belum dipasang.<br>Tambahkan sensor kedua dengan address berbeda untuk mengaktifkan panel ini.
       </div>
     </div>
 
     <footer>
-      <div>Source: <span class="ink">Feed Line A</span></div>
-      <div>Last Updated: <span class="ink" id="lastUpdate">–</span></div>
+      <div>Source: <span class="ink">MQTT</span></div>
+      <div>Last Update: <span class="ink" id="lastUpdate">–</span></div>
       <div>Interval polling: <span class="ink">5s</span></div>
     </footer>
   </div>
@@ -273,7 +296,7 @@
 
   function setOnline(isOnline) {
     statusDot.className = 'dot ' + (isOnline ? 'live' : 'offline');
-    statusText.textContent = isOnline ? 'Terhubung' : 'Tidak ada data terbaru';
+    statusText.textContent = isOnline ? 'Connected' : 'No new data';
   }
 
   function buildSparkPoints(values) {
@@ -303,6 +326,14 @@
 
       // Data Adafruit IO urut dari terbaru -> terlama
       const latest = JSON.parse(rows[0].value);
+
+      // Field "online" baru ada di firmware versi terbaru. Kalau data lama
+      // belum punya field ini, anggap saja aktif supaya tidak salah tampil mati.
+      const moduleOnline = typeof latest.online !== 'undefined' ? !!latest.online : true;
+      const modStatusEl = document.getElementById('a-modstatus');
+      const modStatusText = document.getElementById('a-modstatus-text');
+      modStatusEl.className = 'mod-status ' + (moduleOnline ? 'aktif' : 'mati');
+      modStatusText.textContent = moduleOnline ? 'Aktif' : 'Mati';
 
       document.getElementById('a-v').innerHTML = `${latest.v.toFixed(2)}<span class="unit">V</span>`;
       document.getElementById('a-i').innerHTML = `${latest.i.toFixed(3)}<span class="unit">A</span>`;
