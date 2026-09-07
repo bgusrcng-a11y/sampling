@@ -154,6 +154,14 @@
     border: 1px solid var(--line);
     border-radius: var(--radius);
     padding: 10px 12px;
+    cursor: pointer;
+  }
+
+  .metric:hover { border-color: var(--accent); }
+
+  .metric.metric-selected {
+    border-color: var(--accent);
+    background: rgba(31, 92, 77, 0.06);
   }
 
   .metric .label {
@@ -406,33 +414,33 @@
           <span class="addr">alamat 0x01</span>
         </div>
         <div class="metrics">
-          <div class="metric">
+          <div class="metric" data-metric="v">
             <div class="label">Tegangan</div>
             <div class="value" id="a-v">–<span class="unit">V</span></div>
           </div>
-          <div class="metric">
+          <div class="metric" data-metric="i">
             <div class="label">Arus</div>
             <div class="value" id="a-i">–<span class="unit">A</span></div>
           </div>
-          <div class="metric">
+          <div class="metric metric-selected" data-metric="p">
             <div class="label">Daya aktif</div>
             <div class="value hero" id="a-p">–<span class="unit">W</span></div>
           </div>
-          <div class="metric">
+          <div class="metric" data-metric="pf">
             <div class="label">Faktor daya</div>
             <div class="value" id="a-pf">–</div>
           </div>
-          <div class="metric">
+          <div class="metric" data-metric="freq">
             <div class="label">Frekuensi</div>
             <div class="value" id="a-freq">–<span class="unit">Hz</span></div>
           </div>
-          <div class="metric">
+          <div class="metric" data-metric="energy">
             <div class="label">Energi total</div>
             <div class="value" id="a-energy">–<span class="unit">Wh</span></div>
           </div>
         </div>
         <div class="spark">
-          <div class="label">Daya, riwayat terbaru</div>
+          <div class="label" id="a-spark-label">Daya aktif, riwayat terbaru</div>
           <svg class="spark-line" id="a-spark-svg" viewBox="0 0 300 40" preserveAspectRatio="none">
             <polyline id="a-spark" fill="none" stroke="#1F5C4D" stroke-width="1.6" points="" />
           </svg>
@@ -475,11 +483,22 @@
   <div class="chart-tooltip" id="chartTooltip" hidden></div>
 
 <script>
-  const POLL_MS = 3000;
+  const POLL_MS = 5000;
   const statusDot = document.getElementById('statusDot');
   const statusText = document.getElementById('statusText');
   const lastUpdateEl = document.getElementById('lastUpdate');
-  let aSparkChartData = { coords: [], points: [] };
+  let aSparkChartData = { coords: [], points: [], decimals: 1, unit: 'W' };
+  let selectedMetricA = 'p';
+  let lastRowsA = [];
+
+  const METRIC_DEFS = [
+    { key: 'v',      label: 'Tegangan',      unit: 'V',  decimals: 2 },
+    { key: 'i',      label: 'Arus',          unit: 'A',  decimals: 3 },
+    { key: 'p',      label: 'Daya aktif',    unit: 'W',  decimals: 1 },
+    { key: 'pf',     label: 'Faktor daya',   unit: '',   decimals: 2 },
+    { key: 'freq',   label: 'Frekuensi',     unit: 'Hz', decimals: 1 },
+    { key: 'energy', label: 'Energi total',  unit: 'Wh', decimals: 0 }
+  ];
 
   function setOnline(isOnline) {
     statusDot.className = 'dot ' + (isOnline ? 'live' : 'offline');
@@ -514,9 +533,10 @@
   const tooltipEl = document.getElementById('chartTooltip');
 
   // Pasang interaksi hover/touch pada sebuah <svg> chart.
-  // dataGetter() harus mengembalikan { coords, points } setiap kali dipanggil,
-  // supaya untuk chart yang datanya berubah (sparkline Home) selalu ambil data terbaru.
-  function bindChartHover(svgEl, dataGetter, opts) {
+  // dataGetter() harus mengembalikan { coords, points, decimals, unit } setiap kali
+  // dipanggil, supaya chart yang datanya/parameternya bisa berubah (sparkline Home)
+  // selalu memakai data & format terbaru.
+  function bindChartHover(svgEl, dataGetter) {
     const NS = 'http://www.w3.org/2000/svg';
     const marker = document.createElementNS(NS, 'circle');
     marker.setAttribute('r', '3');
@@ -525,7 +545,7 @@
     svgEl.appendChild(marker);
 
     function handleMove(clientX, clientY) {
-      const { coords, points } = dataGetter();
+      const { coords, points, decimals, unit } = dataGetter();
       if (!coords || coords.length === 0) return;
       const rect = svgEl.getBoundingClientRect();
       if (rect.width === 0) return;
@@ -542,7 +562,7 @@
       marker.setAttribute('opacity', '1');
 
       const timeStr = fmtTimeOnly(p.t);
-      const valueStr = `${p.v.toFixed(opts.decimals)}${opts.unit ? ' ' + opts.unit : ''}`;
+      const valueStr = `${p.v.toFixed(decimals)}${unit ? ' ' + unit : ''}`;
       tooltipEl.innerHTML = `<div class="tt-time">${timeStr}</div><div class="tt-value">${valueStr}</div>`;
       tooltipEl.style.left = clientX + 'px';
       tooltipEl.style.top = clientY + 'px';
@@ -564,7 +584,7 @@
   // Kalau data terbaru di Adafruit IO sudah lebih tua dari ini, berarti
   // ESP32-nya sendiri yang mati (bukan cuma sensor PZEM-nya).
   // Sesuaikan dengan interval publish kamu - idealnya sekitar 2-3x interval publish.
-  const ESP_OFFLINE_THRESHOLD_MS = 10000;
+  const ESP_OFFLINE_THRESHOLD_MS = 20000;
 
   function setModuleStatus(isOn) {
     const modStatusEl = document.getElementById('a-modstatus');
@@ -582,7 +602,8 @@
     document.getElementById('a-energy').innerHTML = `0<span class="unit">Wh</span>`;
     document.getElementById('a-spark').setAttribute('points', '');
     document.getElementById('a-spark-range').textContent = '';
-    aSparkChartData = { coords: [], points: [] };
+    lastRowsA = [];
+    aSparkChartData = { coords: [], points: [], decimals: 1, unit: 'W' };
   }
 
   async function refresh() {
@@ -627,22 +648,8 @@
       document.getElementById('a-freq').innerHTML = `${latest.freq.toFixed(1)}<span class="unit">Hz</span>`;
       document.getElementById('a-energy').innerHTML = `${latest.energy}<span class="unit">Wh</span>`;
 
-      const powerPoints = rows
-        .map(r => {
-          try { return { t: new Date(r.created_at), v: JSON.parse(r.value).p }; }
-          catch { return null; }
-        })
-        .filter(p => p !== null && typeof p.v === 'number')
-        .reverse();
-
-      const sparkCoords = buildCoords(powerPoints.map(p => p.v), 300, 40);
-      document.getElementById('a-spark').setAttribute('points', coordsToPointsStr(sparkCoords));
-      aSparkChartData = { coords: sparkCoords, points: powerPoints };
-
-      const sparkRangeEl = document.getElementById('a-spark-range');
-      sparkRangeEl.textContent = powerPoints.length >= 2
-        ? `${fmtTimeOnly(powerPoints[0].t)} s.d. ${fmtTimeOnly(powerPoints[powerPoints.length - 1].t)}`
-        : '';
+      lastRowsA = rows;
+      renderHomeSpark(selectedMetricA);
 
       lastUpdateEl.textContent = new Date().toLocaleTimeString('id-ID');
       setOnline(true);
@@ -654,20 +661,46 @@
     }
   }
 
+  function renderHomeSpark(metricKey) {
+    const def = METRIC_DEFS.find(d => d.key === metricKey) || METRIC_DEFS[2];
+
+    const points = lastRowsA
+      .map(r => {
+        try {
+          const d = JSON.parse(r.value);
+          return { t: new Date(r.created_at), v: d[def.key] };
+        } catch { return null; }
+      })
+      .filter(p => p !== null && typeof p.v === 'number')
+      .reverse();
+
+    const coords = buildCoords(points.map(p => p.v), 300, 40);
+    document.getElementById('a-spark').setAttribute('points', coordsToPointsStr(coords));
+    aSparkChartData = { coords, points, decimals: def.decimals, unit: def.unit };
+
+    document.getElementById('a-spark-label').textContent = `${def.label}, riwayat terbaru`;
+
+    const sparkRangeEl = document.getElementById('a-spark-range');
+    sparkRangeEl.textContent = points.length >= 2
+      ? `${fmtTimeOnly(points[0].t)} s.d. ${fmtTimeOnly(points[points.length - 1].t)}`
+      : '';
+  }
+
+  document.querySelectorAll('#panelA .metric[data-metric]').forEach(el => {
+    el.addEventListener('click', () => {
+      selectedMetricA = el.dataset.metric;
+      document.querySelectorAll('#panelA .metric[data-metric]').forEach(m => {
+        m.classList.toggle('metric-selected', m.dataset.metric === selectedMetricA);
+      });
+      renderHomeSpark(selectedMetricA);
+    });
+  });
+
   refresh();
   setInterval(refresh, POLL_MS);
-  bindChartHover(document.getElementById('a-spark-svg'), () => aSparkChartData, { decimals: 1, unit: 'W' });
+  bindChartHover(document.getElementById('a-spark-svg'), () => aSparkChartData);
 
   // ===== Modal riwayat =====
-  const METRIC_DEFS = [
-    { key: 'v',      label: 'Tegangan',      unit: 'V',  decimals: 2 },
-    { key: 'i',      label: 'Arus',          unit: 'A',  decimals: 3 },
-    { key: 'p',      label: 'Daya aktif',    unit: 'W',  decimals: 1 },
-    { key: 'pf',     label: 'Faktor daya',   unit: '',   decimals: 2 },
-    { key: 'freq',   label: 'Frekuensi',     unit: 'Hz', decimals: 1 },
-    { key: 'energy', label: 'Energi total',  unit: 'Wh', decimals: 0 }
-  ];
-
   const historyModal = document.getElementById('historyModal');
   const historyBody = document.getElementById('historyBody');
   const tabA = document.getElementById('tabA');
@@ -755,11 +788,7 @@
       svgEls.forEach((svgEl, i) => {
         const chartData = interactiveCharts[i];
         if (!chartData) return;
-        bindChartHover(
-          svgEl,
-          () => ({ coords: chartData.coords, points: chartData.points }),
-          { decimals: chartData.decimals, unit: chartData.unit }
-        );
+        bindChartHover(svgEl, () => chartData);
       });
     } catch (err) {
       console.error(err);
