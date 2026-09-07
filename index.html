@@ -735,6 +735,7 @@
     let allRows = [];
     let endTime = null;
     let page = 0;
+    let reportedTotal = null; // dari header X-Pagination-Total pada request pertama
 
     while (page < MAX_PAGES) {
       page++;
@@ -745,6 +746,12 @@
 
       const res = await fetch(url);
       if (!res.ok) throw new Error(`Adafruit IO merespons status ${res.status}`);
+
+      if (page === 1) {
+        const totalHeader = res.headers.get('x-pagination-total');
+        if (totalHeader !== null) reportedTotal = parseInt(totalHeader, 10);
+      }
+
       const rows = await res.json();
 
       if (!Array.isArray(rows) || rows.length === 0) break;
@@ -760,7 +767,7 @@
       endTime = new Date(oldestTime).toISOString();
     }
 
-    return allRows;
+    return { rows: allRows, reportedTotal };
   }
 
   // Downsample: kalau titik data jauh lebih banyak dari yang mau digambar,
@@ -794,7 +801,7 @@
     historyBody.innerHTML = '<div class="modal-loading">Memuat riwayat (halaman 1)...</div>';
 
     try {
-      const rows = await fetchAllHistory(feed, (page, countSoFar) => {
+      const { rows, reportedTotal } = await fetchAllHistory(feed, (page, countSoFar) => {
         historyBody.innerHTML = `<div class="modal-loading">Memuat riwayat (halaman ${page}, ${countSoFar} baris terkumpul)...</div>`;
       });
 
@@ -817,8 +824,15 @@
 
       const earliestTime = parsed[0].time;
       const latestTime = parsed[parsed.length - 1].time;
-      historyHintEl.textContent =
-        `${parsed.length} titik data, dari ${fmtDateTime(earliestTime)} s.d. ${fmtDateTime(latestTime)}`;
+
+      // Bandingkan jumlah yang berhasil dimuat vs total sesungguhnya di
+      // Adafruit IO (dari header X-Pagination-Total). Kalau beda, tampilkan
+      // peringatan supaya jelas ini beda kasus dengan "memang cuma segitu datanya".
+      let hintText = `${parsed.length} titik data, dari ${fmtDateTime(earliestTime)} s.d. ${fmtDateTime(latestTime)}`;
+      if (reportedTotal !== null && !Number.isNaN(reportedTotal) && reportedTotal > parsed.length) {
+        hintText += ` (Adafruit IO melaporkan total ${reportedTotal} titik untuk feed ini — ada ${reportedTotal - parsed.length} titik yang belum termuat, coba muat ulang)`;
+      }
+      historyHintEl.textContent = hintText;
 
       let html = '<div class="modal-charts">';
       const interactiveCharts = [];
