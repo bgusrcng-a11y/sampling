@@ -302,6 +302,34 @@
     color: var(--muted);
   }
 
+  .chart-tooltip {
+    position: fixed;
+    pointer-events: none;
+    background: var(--ink);
+    border-radius: 6px;
+    padding: 5px 9px;
+    z-index: 100;
+    white-space: nowrap;
+    transform: translate(-50%, -125%);
+  }
+
+  .chart-tooltip[hidden] { display: none; }
+
+  .chart-tooltip .tt-time {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10.5px;
+    color: rgba(255,255,255,0.65);
+  }
+
+  .chart-tooltip .tt-value {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+    color: #fff;
+    font-weight: 500;
+  }
+
+  svg.spark-line, .chart-block svg { cursor: crosshair; }
+
   .btn-close {
     font-family: 'IBM Plex Sans', sans-serif;
     font-size: 12.5px;
@@ -405,7 +433,7 @@
         </div>
         <div class="spark">
           <div class="label">Daya, riwayat terbaru</div>
-          <svg class="spark-line" viewBox="0 0 300 40" preserveAspectRatio="none">
+          <svg class="spark-line" id="a-spark-svg" viewBox="0 0 300 40" preserveAspectRatio="none">
             <polyline id="a-spark" fill="none" stroke="#1F5C4D" stroke-width="1.6" points="" />
           </svg>
           <div class="range" id="a-spark-range"></div>
@@ -444,11 +472,14 @@
     </div>
   </div>
 
+  <div class="chart-tooltip" id="chartTooltip" hidden></div>
+
 <script>
   const POLL_MS = 5000;
   const statusDot = document.getElementById('statusDot');
   const statusText = document.getElementById('statusText');
   const lastUpdateEl = document.getElementById('lastUpdate');
+  let aSparkChartData = { coords: [], points: [] };
 
   function setOnline(isOnline) {
     statusDot.className = 'dot ' + (isOnline ? 'live' : 'offline');
@@ -459,19 +490,75 @@
     return d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
   }
 
-  function buildSparkPoints(values) {
-    if (values.length < 2) return '';
+  function fmtTimeOnly(d) {
+    return d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+  }
+
+  // Hitung koordinat x,y (dalam satuan viewBox) dari sebuah array nilai
+  function buildCoords(values, w, h) {
+    if (values.length < 2) return [];
     const max = Math.max(...values);
     const min = Math.min(...values);
     const range = (max - min) || 1;
-    const stepX = 300 / (values.length - 1);
-    return values
-      .map((v, i) => {
-        const x = i * stepX;
-        const y = 36 - ((v - min) / range) * 30;
-        return `${x.toFixed(1)},${y.toFixed(1)}`;
-      })
-      .join(' ');
+    const stepX = w / (values.length - 1);
+    return values.map((v, i) => ({
+      x: i * stepX,
+      y: (h - 4) - ((v - min) / range) * (h - 8)
+    }));
+  }
+
+  function coordsToPointsStr(coords) {
+    return coords.map(c => `${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(' ');
+  }
+
+  const tooltipEl = document.getElementById('chartTooltip');
+
+  // Pasang interaksi hover/touch pada sebuah <svg> chart.
+  // dataGetter() harus mengembalikan { coords, points } setiap kali dipanggil,
+  // supaya untuk chart yang datanya berubah (sparkline Home) selalu ambil data terbaru.
+  function bindChartHover(svgEl, dataGetter, opts) {
+    const NS = 'http://www.w3.org/2000/svg';
+    const marker = document.createElementNS(NS, 'circle');
+    marker.setAttribute('r', '3');
+    marker.setAttribute('fill', '#1F5C4D');
+    marker.setAttribute('opacity', '0');
+    svgEl.appendChild(marker);
+
+    function handleMove(clientX, clientY) {
+      const { coords, points } = dataGetter();
+      if (!coords || coords.length === 0) return;
+      const rect = svgEl.getBoundingClientRect();
+      if (rect.width === 0) return;
+
+      let relX = (clientX - rect.left) / rect.width;
+      relX = Math.max(0, Math.min(1, relX));
+      const idx = Math.round(relX * (coords.length - 1));
+      const c = coords[idx];
+      const p = points[idx];
+      if (!c || !p) return;
+
+      marker.setAttribute('cx', c.x);
+      marker.setAttribute('cy', c.y);
+      marker.setAttribute('opacity', '1');
+
+      const timeStr = fmtTimeOnly(p.t);
+      const valueStr = `${p.v.toFixed(opts.decimals)}${opts.unit ? ' ' + opts.unit : ''}`;
+      tooltipEl.innerHTML = `<div class="tt-time">${timeStr}</div><div class="tt-value">${valueStr}</div>`;
+      tooltipEl.style.left = clientX + 'px';
+      tooltipEl.style.top = clientY + 'px';
+      tooltipEl.hidden = false;
+    }
+
+    function hide() {
+      marker.setAttribute('opacity', '0');
+      tooltipEl.hidden = true;
+    }
+
+    svgEl.addEventListener('mousemove', (e) => handleMove(e.clientX, e.clientY));
+    svgEl.addEventListener('mouseleave', hide);
+    svgEl.addEventListener('touchstart', (e) => { const t = e.touches[0]; if (t) handleMove(t.clientX, t.clientY); }, { passive: true });
+    svgEl.addEventListener('touchmove', (e) => { const t = e.touches[0]; if (t) handleMove(t.clientX, t.clientY); }, { passive: true });
+    svgEl.addEventListener('touchend', hide);
   }
 
   // Kalau data terbaru di Adafruit IO sudah lebih tua dari ini, berarti
@@ -495,6 +582,7 @@
     document.getElementById('a-energy').innerHTML = `0<span class="unit">Wh</span>`;
     document.getElementById('a-spark').setAttribute('points', '');
     document.getElementById('a-spark-range').textContent = '';
+    aSparkChartData = { coords: [], points: [] };
   }
 
   async function refresh() {
@@ -547,7 +635,9 @@
         .filter(p => p !== null && typeof p.v === 'number')
         .reverse();
 
-      document.getElementById('a-spark').setAttribute('points', buildSparkPoints(powerPoints.map(p => p.v)));
+      const sparkCoords = buildCoords(powerPoints.map(p => p.v), 300, 40);
+      document.getElementById('a-spark').setAttribute('points', coordsToPointsStr(sparkCoords));
+      aSparkChartData = { coords: sparkCoords, points: powerPoints };
 
       const sparkRangeEl = document.getElementById('a-spark-range');
       sparkRangeEl.textContent = powerPoints.length >= 2
@@ -566,6 +656,7 @@
 
   refresh();
   setInterval(refresh, POLL_MS);
+  bindChartHover(document.getElementById('a-spark-svg'), () => aSparkChartData, { decimals: 1, unit: 'W' });
 
   // ===== Modal riwayat =====
   const METRIC_DEFS = [
@@ -600,21 +691,6 @@
     return { startISO: start.toISOString(), endISO: end.toISOString() };
   }
 
-  function buildChartPoints(values, w, h) {
-    if (values.length < 2) return '';
-    const max = Math.max(...values);
-    const min = Math.min(...values);
-    const range = (max - min) || 1;
-    const stepX = w / (values.length - 1);
-    return values
-      .map((v, i) => {
-        const x = i * stepX;
-        const y = (h - 4) - ((v - min) / range) * (h - 8);
-        return `${x.toFixed(1)},${y.toFixed(1)}`;
-      })
-      .join(' ');
-  }
-
   async function openHistory(feed) {
     historyModal.hidden = false;
     historyBody.innerHTML = '<div class="modal-loading">Memuat riwayat...</div>';
@@ -647,6 +723,7 @@
         .reverse();
 
       let html = '<div class="modal-charts">';
+      const interactiveCharts = [];
       METRIC_DEFS.forEach(def => {
         const points = parsed
           .map(p => ({ t: p.time, v: p.data[def.key] }))
@@ -657,14 +734,15 @@
         const values = points.map(p => p.v);
         const latestVal = values[values.length - 1];
         const rangeText = `${fmtTimeOnly(points[0].t)} s.d. ${fmtTimeOnly(points[points.length - 1].t)}`;
-        const chartPoints = buildChartPoints(values, 300, 56);
+        const coords = buildCoords(values, 300, 56);
+        interactiveCharts.push({ coords, points, decimals: def.decimals, unit: def.unit });
 
         html += `
           <div class="chart-block">
             <div class="label">${def.label}</div>
             <div class="value">${latestVal.toFixed(def.decimals)}${def.unit ? ' ' + def.unit : ''}</div>
             <svg viewBox="0 0 300 56" preserveAspectRatio="none">
-              <polyline fill="none" stroke="#1F5C4D" stroke-width="1.6" points="${chartPoints}" />
+              <polyline fill="none" stroke="#1F5C4D" stroke-width="1.6" points="${coordsToPointsStr(coords)}" />
             </svg>
             <div class="range">${rangeText}</div>
           </div>`;
@@ -672,6 +750,17 @@
       html += '</div>';
 
       historyBody.innerHTML = html;
+
+      const svgEls = historyBody.querySelectorAll('.chart-block svg');
+      svgEls.forEach((svgEl, i) => {
+        const chartData = interactiveCharts[i];
+        if (!chartData) return;
+        bindChartHover(
+          svgEl,
+          () => ({ coords: chartData.coords, points: chartData.points }),
+          { decimals: chartData.decimals, unit: chartData.unit }
+        );
+      });
     } catch (err) {
       console.error(err);
       historyBody.innerHTML = '<div class="modal-loading">Gagal memuat riwayat.</div>';
