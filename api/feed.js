@@ -35,6 +35,17 @@ export default async function handler(req, res) {
 
     const data = await response.json();
 
+    // Teruskan header X-Pagination-* dari Adafruit IO ke browser. Header ini
+    // berguna untuk diagnostik: X-Pagination-Total = jumlah total data point
+    // yang SESUNGGUHNYA tersimpan di feed ini menurut Adafruit IO sendiri,
+    // jadi bisa dibandingkan dengan jumlah baris yang berhasil dimuat dashboard
+    // (lihat dokumen resmi: io.adafruit.com/blog/features/2019/02/14/adafruit-io-pagination-api/)
+    const paginationHeaders = ['x-pagination-total', 'x-pagination-limit', 'x-pagination-start', 'x-pagination-end', 'x-pagination-count'];
+    paginationHeaders.forEach((h) => {
+      const val = response.headers.get(h);
+      if (val !== null) res.setHeader(h, val);
+    });
+
     // Cache singkat di edge Vercel supaya tidak membebani limit request Adafruit IO
     res.setHeader("Cache-Control", "s-maxage=4, stale-while-revalidate=8");
     return res.status(200).json(data);
