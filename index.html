@@ -441,6 +441,28 @@
       .join(' ');
   }
 
+  // Kalau data terbaru di Adafruit IO sudah lebih tua dari ini, berarti
+  // ESP32-nya sendiri yang mati (bukan cuma sensor PZEM-nya).
+  // Sesuaikan dengan interval publish kamu - idealnya sekitar 2-3x interval publish.
+  const ESP_OFFLINE_THRESHOLD_MS = 10000;
+
+  function setModuleStatus(isOn) {
+    const modStatusEl = document.getElementById('a-modstatus');
+    const modStatusText = document.getElementById('a-modstatus-text');
+    modStatusEl.className = 'mod-status ' + (isOn ? 'aktif' : 'mati');
+    modStatusText.textContent = isOn ? 'Aktif' : 'Mati';
+  }
+
+  function applyZeroValues() {
+    document.getElementById('a-v').innerHTML = `0.00<span class="unit">V</span>`;
+    document.getElementById('a-i').innerHTML = `0.000<span class="unit">A</span>`;
+    document.getElementById('a-p').innerHTML = `0.0<span class="unit">W</span>`;
+    document.getElementById('a-pf').textContent = '0.00';
+    document.getElementById('a-freq').innerHTML = `0.0<span class="unit">Hz</span>`;
+    document.getElementById('a-energy').innerHTML = `0<span class="unit">Wh</span>`;
+    document.getElementById('a-spark').setAttribute('points', '');
+  }
+
   async function refresh() {
     try {
       const res = await fetch('/api/feed?feed=jalur-a&limit=20');
@@ -448,19 +470,33 @@
 
       if (!Array.isArray(rows) || rows.length === 0) {
         setOnline(false);
+        setModuleStatus(false);
+        applyZeroValues();
+        return;
+      }
+
+      const latestRow = rows[0];
+      const ageMs = Date.now() - new Date(latestRow.created_at).getTime();
+      const espOnline = ageMs < ESP_OFFLINE_THRESHOLD_MS;
+
+      // ESP32 dianggap mati total kalau sudah lama tidak ada data BARU sama
+      // sekali yang masuk ke Adafruit IO (device-nya berhenti publish).
+      if (!espOnline) {
+        setOnline(false);
+        setModuleStatus(false);
+        applyZeroValues();
+        lastUpdateEl.textContent = new Date().toLocaleTimeString('id-ID');
         return;
       }
 
       // Data Adafruit IO urut dari terbaru -> terlama
-      const latest = JSON.parse(rows[0].value);
+      const latest = JSON.parse(latestRow.value);
 
-      // Field "online" baru ada di firmware versi terbaru. Kalau data lama
-      // belum punya field ini, anggap saja aktif supaya tidak salah tampil mati.
-      const moduleOnline = typeof latest.online !== 'undefined' ? !!latest.online : true;
-      const modStatusEl = document.getElementById('a-modstatus');
-      const modStatusText = document.getElementById('a-modstatus-text');
-      modStatusEl.className = 'mod-status ' + (moduleOnline ? 'aktif' : 'mati');
-      modStatusText.textContent = moduleOnline ? 'Aktif' : 'Mati';
+      // Field "online" ini soal status sensor PZEM-nya saja (ESP32 tetap hidup,
+      // tapi pembacaan sensornya gagal/putus). Kalau data lama belum punya
+      // field ini, anggap saja aktif supaya tidak salah tampil mati.
+      const sensorOnline = typeof latest.online !== 'undefined' ? !!latest.online : true;
+      setModuleStatus(sensorOnline);
 
       document.getElementById('a-v').innerHTML = `${latest.v.toFixed(2)}<span class="unit">V</span>`;
       document.getElementById('a-i').innerHTML = `${latest.i.toFixed(3)}<span class="unit">A</span>`;
@@ -481,6 +517,8 @@
     } catch (err) {
       console.error(err);
       setOnline(false);
+      setModuleStatus(false);
+      applyZeroValues();
     }
   }
 
