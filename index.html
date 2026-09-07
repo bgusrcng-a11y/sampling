@@ -279,6 +279,29 @@
 
   .tab-btn.active { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
 
+  .history-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+  }
+
+  .history-controls input[type="date"] {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+    color: var(--ink);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    padding: 5px 10px;
+  }
+
+  .history-hint {
+    font-size: 11.5px;
+    color: var(--muted);
+  }
+
   .btn-close {
     font-family: 'IBM Plex Sans', sans-serif;
     font-size: 12.5px;
@@ -409,6 +432,11 @@
         </div>
         <button class="btn-close" id="closeHistory">Tutup</button>
       </div>
+      <div class="history-controls">
+        <input type="date" id="historyDate">
+        <button id="loadHistoryBtn" class="btn-history">Tampilkan</button>
+        <span class="history-hint">Menampilkan data 00:00–23:59 pada tanggal terpilih</span>
+      </div>
       <div id="historyBody">
         <div class="modal-loading">Memuat riwayat...</div>
       </div>
@@ -444,7 +472,7 @@
   // Kalau data terbaru di Adafruit IO sudah lebih tua dari ini, berarti
   // ESP32-nya sendiri yang mati (bukan cuma sensor PZEM-nya).
   // Sesuaikan dengan interval publish kamu - idealnya sekitar 2-3x interval publish.
-  const ESP_OFFLINE_THRESHOLD_MS = 10000;
+  const ESP_OFFLINE_THRESHOLD_MS = 15000;
 
   function setModuleStatus(isOn) {
     const modStatusEl = document.getElementById('a-modstatus');
@@ -539,7 +567,24 @@
   const historyBody = document.getElementById('historyBody');
   const tabA = document.getElementById('tabA');
   const tabB = document.getElementById('tabB');
+  const historyDateInput = document.getElementById('historyDate');
+  const loadHistoryBtn = document.getElementById('loadHistoryBtn');
   let currentFeed = 'jalur-a';
+
+  function todayLocalDateStr() {
+    const d = new Date();
+    const offset = d.getTimezoneOffset();
+    const local = new Date(d.getTime() - offset * 60000);
+    return local.toISOString().slice(0, 10);
+  }
+
+  // Ubah tanggal terpilih (YYYY-MM-DD, waktu lokal) jadi rentang 00:00-23:59
+  // dalam format ISO yang dimengerti Adafruit IO
+  function dayRangeISO(dateStr) {
+    const start = new Date(`${dateStr}T00:00:00`);
+    const end = new Date(`${dateStr}T23:59:59`);
+    return { startISO: start.toISOString(), endISO: end.toISOString() };
+  }
 
   function buildChartPoints(values, w, h) {
     if (values.length < 2) return '';
@@ -567,14 +612,20 @@
     historyModal.hidden = false;
     historyBody.innerHTML = '<div class="modal-loading">Memuat riwayat...</div>';
 
+    if (!historyDateInput.value) {
+      historyDateInput.value = todayLocalDateStr();
+    }
+    const { startISO, endISO } = dayRangeISO(historyDateInput.value);
+
     try {
-      const res = await fetch(`/api/feed?feed=${feed}&limit=100`);
+      const url = `/api/feed?feed=${feed}&limit=1000&start_time=${encodeURIComponent(startISO)}&end_time=${encodeURIComponent(endISO)}`;
+      const res = await fetch(url);
       const rows = await res.json();
 
       if (!Array.isArray(rows) || rows.length === 0) {
         const pesan = feed === 'jalur-b'
-          ? 'Belum ada data untuk Jalur B. Pasang dan aktifkan sensor kedua terlebih dahulu.'
-          : 'Belum ada data riwayat.';
+          ? 'Belum ada data untuk Jalur B pada tanggal ini. Pastikan sensor kedua sudah aktif.'
+          : 'Tidak ada data pada tanggal yang dipilih.';
         historyBody.innerHTML = `<div class="modal-loading">${pesan}</div>`;
         return;
       }
@@ -628,6 +679,7 @@
   }
 
   document.getElementById('historyBtn').addEventListener('click', () => openHistory(currentFeed));
+  loadHistoryBtn.addEventListener('click', () => openHistory(currentFeed));
   tabA.addEventListener('click', () => switchTab('jalur-a'));
   tabB.addEventListener('click', () => switchTab('jalur-b'));
   document.getElementById('closeHistory').addEventListener('click', () => { historyModal.hidden = true; });
