@@ -341,7 +341,7 @@
 
   .chart-block svg { display: block; width: 100%; height: 56px; }
 
-  .chart-block .range {
+  .range {
     margin-top: 6px;
     font-size: 10.5px;
     color: var(--muted);
@@ -408,6 +408,7 @@
           <svg class="spark-line" viewBox="0 0 300 40" preserveAspectRatio="none">
             <polyline id="a-spark" fill="none" stroke="#1F5C4D" stroke-width="1.6" points="" />
           </svg>
+          <div class="range" id="a-spark-range"></div>
         </div>
       </div>
 
@@ -444,7 +445,7 @@
   </div>
 
 <script>
-  const POLL_MS = 3000;
+  const POLL_MS = 5000;
   const statusDot = document.getElementById('statusDot');
   const statusText = document.getElementById('statusText');
   const lastUpdateEl = document.getElementById('lastUpdate');
@@ -452,6 +453,10 @@
   function setOnline(isOnline) {
     statusDot.className = 'dot ' + (isOnline ? 'live' : 'offline');
     statusText.textContent = isOnline ? 'Terhubung' : 'Tidak ada data terbaru';
+  }
+
+  function fmtTimeOnly(d) {
+    return d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
   }
 
   function buildSparkPoints(values) {
@@ -472,7 +477,7 @@
   // Kalau data terbaru di Adafruit IO sudah lebih tua dari ini, berarti
   // ESP32-nya sendiri yang mati (bukan cuma sensor PZEM-nya).
   // Sesuaikan dengan interval publish kamu - idealnya sekitar 2-3x interval publish.
-  const ESP_OFFLINE_THRESHOLD_MS = 15000;
+  const ESP_OFFLINE_THRESHOLD_MS = 20000;
 
   function setModuleStatus(isOn) {
     const modStatusEl = document.getElementById('a-modstatus');
@@ -489,6 +494,7 @@
     document.getElementById('a-freq').innerHTML = `0.0<span class="unit">Hz</span>`;
     document.getElementById('a-energy').innerHTML = `0<span class="unit">Wh</span>`;
     document.getElementById('a-spark').setAttribute('points', '');
+    document.getElementById('a-spark-range').textContent = '';
   }
 
   async function refresh() {
@@ -533,12 +539,20 @@
       document.getElementById('a-freq').innerHTML = `${latest.freq.toFixed(1)}<span class="unit">Hz</span>`;
       document.getElementById('a-energy').innerHTML = `${latest.energy}<span class="unit">Wh</span>`;
 
-      const powerHistory = rows
-        .map(r => { try { return JSON.parse(r.value).p; } catch { return null; } })
-        .filter(v => v !== null)
+      const powerPoints = rows
+        .map(r => {
+          try { return { t: new Date(r.created_at), v: JSON.parse(r.value).p }; }
+          catch { return null; }
+        })
+        .filter(p => p !== null && typeof p.v === 'number')
         .reverse();
 
-      document.getElementById('a-spark').setAttribute('points', buildSparkPoints(powerHistory));
+      document.getElementById('a-spark').setAttribute('points', buildSparkPoints(powerPoints.map(p => p.v)));
+
+      const sparkRangeEl = document.getElementById('a-spark-range');
+      sparkRangeEl.textContent = powerPoints.length >= 2
+        ? `${fmtTimeOnly(powerPoints[0].t)} s.d. ${fmtTimeOnly(powerPoints[powerPoints.length - 1].t)}`
+        : '';
 
       lastUpdateEl.textContent = new Date().toLocaleTimeString('id-ID');
       setOnline(true);
@@ -601,13 +615,6 @@
       .join(' ');
   }
 
-  function fmtDateTime(d) {
-    return d.toLocaleString('id-ID', {
-      day: '2-digit', month: 'short', year: '2-digit',
-      hour: '2-digit', minute: '2-digit'
-    });
-  }
-
   async function openHistory(feed) {
     historyModal.hidden = false;
     historyBody.innerHTML = '<div class="modal-loading">Memuat riwayat...</div>';
@@ -649,7 +656,7 @@
 
         const values = points.map(p => p.v);
         const latestVal = values[values.length - 1];
-        const rangeText = `${fmtDateTime(points[0].t)} s.d. ${fmtDateTime(points[points.length - 1].t)}`;
+        const rangeText = `${fmtTimeOnly(points[0].t)} s.d. ${fmtTimeOnly(points[points.length - 1].t)}`;
         const chartPoints = buildChartPoints(values, 300, 56);
 
         html += `
