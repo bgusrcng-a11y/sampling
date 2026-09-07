@@ -305,6 +305,16 @@
     padding: 5px 10px;
   }
 
+  .history-controls select {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+    color: var(--ink);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    padding: 5px 10px;
+  }
+
   .history-hint {
     font-size: 11.5px;
     color: var(--muted);
@@ -470,6 +480,7 @@
         <button class="btn-close" id="closeHistory">Tutup</button>
       </div>
       <div class="history-controls">
+        <select id="historyDateFilter"><option value="__all__">Semua tanggal</option></select>
         <button id="loadHistoryBtn" class="btn-history">Muat ulang</button>
         <span class="history-hint" id="historyHint">Menampilkan seluruh data yang tersimpan, dari data paling awal s.d. saat ini</span>
       </div>
@@ -796,6 +807,99 @@
     return result;
   }
 
+  let allParsedHistory = []; // seluruh data feed yang sedang aktif di modal (hasil fetchAllHistory), dipakai ulang saat filter tanggal
+  const historyDateFilter = document.getElementById('historyDateFilter');
+
+  // Kunci tanggal lokal (YYYY-MM-DD) dari sebuah Date, dipakai untuk
+  // mengelompokkan/filter titik data per hari tanpa perlu fetch API lagi.
+  function localDateKey(d) {
+    return d.toLocaleDateString('en-CA'); // format en-CA = YYYY-MM-DD
+  }
+
+  function localDateLabel(d) {
+    return d.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
+  }
+
+  // Bangun ulang isi dropdown tanggal dari data yang sudah termuat, lalu
+  // pertahankan pilihan lama kalau tanggalnya masih ada di data baru.
+  function rebuildDateFilterOptions(parsed) {
+    const prevSelected = historyDateFilter.value || '__all__';
+    const uniqueDates = [...new Set(parsed.map(p => localDateKey(p.time)))].sort();
+
+    historyDateFilter.innerHTML = '<option value="__all__">Semua tanggal</option>' +
+      uniqueDates.map(key => {
+        const sample = parsed.find(p => localDateKey(p.time) === key).time;
+        return `<option value="${key}">${localDateLabel(sample)}</option>`;
+      }).join('');
+
+    historyDateFilter.value = uniqueDates.includes(prevSelected) || prevSelected === '__all__'
+      ? prevSelected
+      : '__all__';
+  }
+
+  // Render grafik dari data yang SUDAH ada di memori (tidak fetch API lagi).
+  // Dipakai baik untuk tampilan "semua tanggal" maupun setelah filter tanggal dipilih.
+  function renderHistoryCharts(parsed) {
+    if (parsed.length === 0) {
+      historyBody.innerHTML = '<div class="modal-loading">Tidak ada data pada tanggal yang dipilih.</div>';
+      return;
+    }
+
+    const earliestTime = parsed[0].time;
+    const latestTime = parsed[parsed.length - 1].time;
+    historyHintEl.textContent = `${parsed.length} titik data, dari ${fmtDateTime(earliestTime)} s.d. ${fmtDateTime(latestTime)}`;
+
+    let html = '<div class="modal-charts">';
+    const interactiveCharts = [];
+    METRIC_DEFS.forEach(def => {
+      const rawPoints = parsed
+        .map(p => ({ t: p.time, v: p.data[def.key] }))
+        .filter(p => typeof p.v === 'number');
+
+      if (rawPoints.length === 0) return;
+
+      // Energi itu kumulatif -> downsample harus ambil nilai TERAKHIR per
+      // bucket, bukan rata-rata, supaya trennya tetap benar (selalu naik).
+      const points = downsample(rawPoints, MAX_CHART_POINTS, def.key === 'energy' ? 'last' : 'avg');
+
+      const values = points.map(p => p.v);
+      const latestVal = rawPoints[rawPoints.length - 1].v; // nilai asli terakhir, bukan hasil downsample
+      const rangeText = `${fmtDateTime(points[0].t)} s.d. ${fmtDateTime(points[points.length - 1].t)}`;
+      const coords = buildCoords(values, 300, 56);
+      interactiveCharts.push({ coords, points, decimals: def.decimals, unit: def.unit });
+
+      html += `
+        <div class="chart-block">
+          <div class="label">${def.label}</div>
+          <div class="value">${latestVal.toFixed(def.decimals)}${def.unit ? ' ' + def.unit : ''}</div>
+          <svg viewBox="0 0 300 56" preserveAspectRatio="none">
+            <polyline fill="none" stroke="#1F5C4D" stroke-width="1.6" points="${coordsToPointsStr(coords)}" />
+          </svg>
+          <div class="range">${rangeText}</div>
+        </div>`;
+    });
+    html += '</div>';
+
+    historyBody.innerHTML = html;
+
+    const svgEls = historyBody.querySelectorAll('.chart-block svg');
+    svgEls.forEach((svgEl, i) => {
+      const chartData = interactiveCharts[i];
+      if (!chartData) return;
+      bindChartHover(svgEl, () => chartData);
+    });
+  }
+
+  function applyDateFilter() {
+    const key = historyDateFilter.value;
+    const filtered = key === '__all__'
+      ? allParsedHistory
+      : allParsedHistory.filter(p => localDateKey(p.time) === key);
+    renderHistoryCharts(filtered);
+  }
+
+  historyDateFilter.addEventListener('change', applyDateFilter);
+
   async function openHistory(feed) {
     historyModal.hidden = false;
     historyBody.innerHTML = '<div class="modal-loading">Memuat riwayat (halaman 1)...</div>';
@@ -822,57 +926,17 @@
         .filter(p => p !== null)
         .reverse();
 
-      const earliestTime = parsed[0].time;
-      const latestTime = parsed[parsed.length - 1].time;
+      allParsedHistory = parsed;
+      rebuildDateFilterOptions(parsed);
 
       // Bandingkan jumlah yang berhasil dimuat vs total sesungguhnya di
       // Adafruit IO (dari header X-Pagination-Total). Kalau beda, tampilkan
       // peringatan supaya jelas ini beda kasus dengan "memang cuma segitu datanya".
-      let hintText = `${parsed.length} titik data, dari ${fmtDateTime(earliestTime)} s.d. ${fmtDateTime(latestTime)}`;
       if (reportedTotal !== null && !Number.isNaN(reportedTotal) && reportedTotal > parsed.length) {
-        hintText += ` (Adafruit IO melaporkan total ${reportedTotal} titik untuk feed ini — ada ${reportedTotal - parsed.length} titik yang belum termuat, coba muat ulang)`;
+        historyHintEl.textContent = `Adafruit IO melaporkan total ${reportedTotal} titik untuk feed ini — ada ${reportedTotal - parsed.length} titik yang belum termuat, coba muat ulang.`;
       }
-      historyHintEl.textContent = hintText;
 
-      let html = '<div class="modal-charts">';
-      const interactiveCharts = [];
-      METRIC_DEFS.forEach(def => {
-        const rawPoints = parsed
-          .map(p => ({ t: p.time, v: p.data[def.key] }))
-          .filter(p => typeof p.v === 'number');
-
-        if (rawPoints.length === 0) return;
-
-        // Energi itu kumulatif -> downsample harus ambil nilai TERAKHIR per
-        // bucket, bukan rata-rata, supaya trennya tetap benar (selalu naik).
-        const points = downsample(rawPoints, MAX_CHART_POINTS, def.key === 'energy' ? 'last' : 'avg');
-
-        const values = points.map(p => p.v);
-        const latestVal = rawPoints[rawPoints.length - 1].v; // nilai asli terakhir, bukan hasil downsample
-        const rangeText = `${fmtDateTime(points[0].t)} s.d. ${fmtDateTime(points[points.length - 1].t)}`;
-        const coords = buildCoords(values, 300, 56);
-        interactiveCharts.push({ coords, points, decimals: def.decimals, unit: def.unit });
-
-        html += `
-          <div class="chart-block">
-            <div class="label">${def.label}</div>
-            <div class="value">${latestVal.toFixed(def.decimals)}${def.unit ? ' ' + def.unit : ''}</div>
-            <svg viewBox="0 0 300 56" preserveAspectRatio="none">
-              <polyline fill="none" stroke="#1F5C4D" stroke-width="1.6" points="${coordsToPointsStr(coords)}" />
-            </svg>
-            <div class="range">${rangeText}</div>
-          </div>`;
-      });
-      html += '</div>';
-
-      historyBody.innerHTML = html;
-
-      const svgEls = historyBody.querySelectorAll('.chart-block svg');
-      svgEls.forEach((svgEl, i) => {
-        const chartData = interactiveCharts[i];
-        if (!chartData) return;
-        bindChartHover(svgEl, () => chartData);
-      });
+      applyDateFilter(); // render sesuai pilihan dropdown saat ini (default: semua tanggal)
     } catch (err) {
       console.error(err);
       historyBody.innerHTML = '<div class="modal-loading">Gagal memuat riwayat.</div>';
