@@ -154,6 +154,14 @@
     border: 1px solid var(--line);
     border-radius: var(--radius);
     padding: 10px 12px;
+    cursor: pointer;
+  }
+
+  .metric:hover { border-color: var(--accent); }
+
+  .metric.metric-selected {
+    border-color: var(--accent);
+    background: rgba(31, 92, 77, 0.06);
   }
 
   .metric .label {
@@ -406,33 +414,33 @@
           <span class="addr">alamat 0x01</span>
         </div>
         <div class="metrics">
-          <div class="metric">
+          <div class="metric" data-metric="v">
             <div class="label">Tegangan</div>
             <div class="value" id="a-v">–<span class="unit">V</span></div>
           </div>
-          <div class="metric">
+          <div class="metric" data-metric="i">
             <div class="label">Arus</div>
             <div class="value" id="a-i">–<span class="unit">A</span></div>
           </div>
-          <div class="metric">
+          <div class="metric metric-selected" data-metric="p">
             <div class="label">Daya aktif</div>
             <div class="value hero" id="a-p">–<span class="unit">W</span></div>
           </div>
-          <div class="metric">
+          <div class="metric" data-metric="pf">
             <div class="label">Faktor daya</div>
             <div class="value" id="a-pf">–</div>
           </div>
-          <div class="metric">
+          <div class="metric" data-metric="freq">
             <div class="label">Frekuensi</div>
             <div class="value" id="a-freq">–<span class="unit">Hz</span></div>
           </div>
-          <div class="metric">
+          <div class="metric" data-metric="energy">
             <div class="label">Energi total</div>
             <div class="value" id="a-energy">–<span class="unit">Wh</span></div>
           </div>
         </div>
         <div class="spark">
-          <div class="label">Daya, riwayat terbaru</div>
+          <div class="label" id="a-spark-label">Daya aktif, riwayat terbaru</div>
           <svg class="spark-line" id="a-spark-svg" viewBox="0 0 300 40" preserveAspectRatio="none">
             <polyline id="a-spark" fill="none" stroke="#1F5C4D" stroke-width="1.6" points="" />
           </svg>
@@ -462,9 +470,8 @@
         <button class="btn-close" id="closeHistory">Tutup</button>
       </div>
       <div class="history-controls">
-        <input type="date" id="historyDate">
-        <button id="loadHistoryBtn" class="btn-history">Tampilkan</button>
-        <span class="history-hint">Menampilkan data 00:00–23:59 pada tanggal terpilih</span>
+        <button id="loadHistoryBtn" class="btn-history">Muat ulang</button>
+        <span class="history-hint" id="historyHint">Menampilkan seluruh data yang tersimpan, dari data paling awal s.d. saat ini</span>
       </div>
       <div id="historyBody">
         <div class="modal-loading">Memuat riwayat...</div>
@@ -479,7 +486,18 @@
   const statusDot = document.getElementById('statusDot');
   const statusText = document.getElementById('statusText');
   const lastUpdateEl = document.getElementById('lastUpdate');
-  let aSparkChartData = { coords: [], points: [] };
+  let aSparkChartData = { coords: [], points: [], decimals: 1, unit: 'W' };
+  let selectedMetricA = 'p';
+  let lastRowsA = [];
+
+  const METRIC_DEFS = [
+    { key: 'v',      label: 'Tegangan',      unit: 'V',  decimals: 2 },
+    { key: 'i',      label: 'Arus',          unit: 'A',  decimals: 3 },
+    { key: 'p',      label: 'Daya aktif',    unit: 'W',  decimals: 1 },
+    { key: 'pf',     label: 'Faktor daya',   unit: '',   decimals: 2 },
+    { key: 'freq',   label: 'Frekuensi',     unit: 'Hz', decimals: 1 },
+    { key: 'energy', label: 'Energi total',  unit: 'Wh', decimals: 0 }
+  ];
 
   function setOnline(isOnline) {
     statusDot.className = 'dot ' + (isOnline ? 'live' : 'offline');
@@ -490,8 +508,10 @@
     return d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
   }
 
-  function fmtTimeOnly(d) {
-    return d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+  // Dipakai di modal riwayat karena rentangnya sekarang bisa mencakup banyak
+  // hari (bukan cuma satu tanggal), jadi tanggalnya perlu ikut ditampilkan.
+  function fmtDateTime(d) {
+    return d.toLocaleString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
   }
 
   // Hitung koordinat x,y (dalam satuan viewBox) dari sebuah array nilai
@@ -514,9 +534,10 @@
   const tooltipEl = document.getElementById('chartTooltip');
 
   // Pasang interaksi hover/touch pada sebuah <svg> chart.
-  // dataGetter() harus mengembalikan { coords, points } setiap kali dipanggil,
-  // supaya untuk chart yang datanya berubah (sparkline Home) selalu ambil data terbaru.
-  function bindChartHover(svgEl, dataGetter, opts) {
+  // dataGetter() harus mengembalikan { coords, points, decimals, unit } setiap kali
+  // dipanggil, supaya chart yang datanya/parameternya bisa berubah (sparkline Home)
+  // selalu memakai data & format terbaru.
+  function bindChartHover(svgEl, dataGetter) {
     const NS = 'http://www.w3.org/2000/svg';
     const marker = document.createElementNS(NS, 'circle');
     marker.setAttribute('r', '3');
@@ -525,7 +546,7 @@
     svgEl.appendChild(marker);
 
     function handleMove(clientX, clientY) {
-      const { coords, points } = dataGetter();
+      const { coords, points, decimals, unit } = dataGetter();
       if (!coords || coords.length === 0) return;
       const rect = svgEl.getBoundingClientRect();
       if (rect.width === 0) return;
@@ -542,7 +563,7 @@
       marker.setAttribute('opacity', '1');
 
       const timeStr = fmtTimeOnly(p.t);
-      const valueStr = `${p.v.toFixed(opts.decimals)}${opts.unit ? ' ' + opts.unit : ''}`;
+      const valueStr = `${p.v.toFixed(decimals)}${unit ? ' ' + unit : ''}`;
       tooltipEl.innerHTML = `<div class="tt-time">${timeStr}</div><div class="tt-value">${valueStr}</div>`;
       tooltipEl.style.left = clientX + 'px';
       tooltipEl.style.top = clientY + 'px';
@@ -582,7 +603,8 @@
     document.getElementById('a-energy').innerHTML = `0<span class="unit">Wh</span>`;
     document.getElementById('a-spark').setAttribute('points', '');
     document.getElementById('a-spark-range').textContent = '';
-    aSparkChartData = { coords: [], points: [] };
+    lastRowsA = [];
+    aSparkChartData = { coords: [], points: [], decimals: 1, unit: 'W' };
   }
 
   async function refresh() {
@@ -627,22 +649,8 @@
       document.getElementById('a-freq').innerHTML = `${latest.freq.toFixed(1)}<span class="unit">Hz</span>`;
       document.getElementById('a-energy').innerHTML = `${latest.energy}<span class="unit">Wh</span>`;
 
-      const powerPoints = rows
-        .map(r => {
-          try { return { t: new Date(r.created_at), v: JSON.parse(r.value).p }; }
-          catch { return null; }
-        })
-        .filter(p => p !== null && typeof p.v === 'number')
-        .reverse();
-
-      const sparkCoords = buildCoords(powerPoints.map(p => p.v), 300, 40);
-      document.getElementById('a-spark').setAttribute('points', coordsToPointsStr(sparkCoords));
-      aSparkChartData = { coords: sparkCoords, points: powerPoints };
-
-      const sparkRangeEl = document.getElementById('a-spark-range');
-      sparkRangeEl.textContent = powerPoints.length >= 2
-        ? `${fmtTimeOnly(powerPoints[0].t)} s.d. ${fmtTimeOnly(powerPoints[powerPoints.length - 1].t)}`
-        : '';
+      lastRowsA = rows;
+      renderHomeSpark(selectedMetricA);
 
       lastUpdateEl.textContent = new Date().toLocaleTimeString('id-ID');
       setOnline(true);
@@ -654,61 +662,146 @@
     }
   }
 
+  function renderHomeSpark(metricKey) {
+    const def = METRIC_DEFS.find(d => d.key === metricKey) || METRIC_DEFS[2];
+
+    const points = lastRowsA
+      .map(r => {
+        try {
+          const d = JSON.parse(r.value);
+          return { t: new Date(r.created_at), v: d[def.key] };
+        } catch { return null; }
+      })
+      .filter(p => p !== null && typeof p.v === 'number')
+      .reverse();
+
+    const coords = buildCoords(points.map(p => p.v), 300, 40);
+    document.getElementById('a-spark').setAttribute('points', coordsToPointsStr(coords));
+    aSparkChartData = { coords, points, decimals: def.decimals, unit: def.unit };
+
+    document.getElementById('a-spark-label').textContent = `${def.label}, riwayat terbaru`;
+
+    const sparkRangeEl = document.getElementById('a-spark-range');
+    sparkRangeEl.textContent = points.length >= 2
+      ? `${fmtTimeOnly(points[0].t)} s.d. ${fmtTimeOnly(points[points.length - 1].t)}`
+      : '';
+  }
+
+  document.querySelectorAll('#panelA .metric[data-metric]').forEach(el => {
+    el.addEventListener('click', () => {
+      selectedMetricA = el.dataset.metric;
+      document.querySelectorAll('#panelA .metric[data-metric]').forEach(m => {
+        m.classList.toggle('metric-selected', m.dataset.metric === selectedMetricA);
+      });
+      renderHomeSpark(selectedMetricA);
+    });
+  });
+
   refresh();
   setInterval(refresh, POLL_MS);
-  bindChartHover(document.getElementById('a-spark-svg'), () => aSparkChartData, { decimals: 1, unit: 'W' });
+  bindChartHover(document.getElementById('a-spark-svg'), () => aSparkChartData);
 
   // ===== Modal riwayat =====
-  const METRIC_DEFS = [
-    { key: 'v',      label: 'Tegangan',      unit: 'V',  decimals: 2 },
-    { key: 'i',      label: 'Arus',          unit: 'A',  decimals: 3 },
-    { key: 'p',      label: 'Daya aktif',    unit: 'W',  decimals: 1 },
-    { key: 'pf',     label: 'Faktor daya',   unit: '',   decimals: 2 },
-    { key: 'freq',   label: 'Frekuensi',     unit: 'Hz', decimals: 1 },
-    { key: 'energy', label: 'Energi total',  unit: 'Wh', decimals: 0 }
-  ];
-
   const historyModal = document.getElementById('historyModal');
   const historyBody = document.getElementById('historyBody');
+  const historyHintEl = document.getElementById('historyHint');
   const tabA = document.getElementById('tabA');
   const tabB = document.getElementById('tabB');
-  const historyDateInput = document.getElementById('historyDate');
   const loadHistoryBtn = document.getElementById('loadHistoryBtn');
   let currentFeed = 'jalur-a';
 
-  function todayLocalDateStr() {
-    const d = new Date();
-    const offset = d.getTimezoneOffset();
-    const local = new Date(d.getTime() - offset * 60000);
-    return local.toISOString().slice(0, 10);
+  // Batas jumlah row per request ke Adafruit IO REST API. Menurut dokumentasi
+  // resmi, limit maksimum yang bisa diminta eksplisit per request adalah 1000
+  // (default-nya sendiri sudah diturunkan ke 100 sejak April 2022, makanya
+  // limit=1000 harus disebut eksplisit di query string).
+  const PAGE_LIMIT = 1000;
+  // Pengaman supaya tidak memanggil API ratusan kali kalau datanya sangat
+  // banyak (mis. interval publish 10 detik x 30 hari retensi Adafruit IO
+  // free plan = ratusan ribu baris). 80 halaman x 1000 = 80.000 baris,
+  // sudah jauh melebihi 30 hari data pada interval publish 10 detik.
+  const MAX_PAGES = 80;
+  // Jumlah titik akhir yang benar-benar digambar di tiap chart, supaya SVG
+  // tetap ringan & enak dibaca walau data mentahnya puluhan ribu baris.
+  const MAX_CHART_POINTS = 240;
+
+  // Ambil SEMUA data yang tersimpan di Adafruit IO untuk sebuah feed, dari
+  // data paling awal yang masih tersisa (dibatasi kebijakan retensi Adafruit
+  // IO: 30 hari untuk akun free, 60 hari untuk IO+) sampai data terbaru.
+  // Adafruit IO REST API selalu mengembalikan data terbaru dulu, jadi di sini
+  // kita paginasi MUNDUR pakai parameter end_time = waktu row tertua dari
+  // batch sebelumnya, sampai jumlah row yang kembali < PAGE_LIMIT (artinya
+  // sudah menyentuh data paling awal).
+  async function fetchAllHistory(feed, onProgress) {
+    let allRows = [];
+    let endTime = null;
+    let page = 0;
+
+    while (page < MAX_PAGES) {
+      page++;
+      let url = `/api/feed?feed=${feed}&limit=${PAGE_LIMIT}`;
+      if (endTime) url += `&end_time=${encodeURIComponent(endTime)}`;
+
+      if (onProgress) onProgress(page, allRows.length);
+
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`Adafruit IO merespons status ${res.status}`);
+      const rows = await res.json();
+
+      if (!Array.isArray(rows) || rows.length === 0) break;
+
+      allRows = allRows.concat(rows);
+
+      if (rows.length < PAGE_LIMIT) break; // sudah sampai data paling awal
+
+      // created_at row terlama di batch ini jadi batas atas (end_time) untuk
+      // request berikutnya, dikurangi 1ms supaya row ini tidak ikut kembali dobel
+      const oldest = rows[rows.length - 1];
+      const oldestTime = new Date(oldest.created_at).getTime() - 1;
+      endTime = new Date(oldestTime).toISOString();
+    }
+
+    return allRows;
   }
 
-  // Ubah tanggal terpilih (YYYY-MM-DD, waktu lokal) jadi rentang 00:00-23:59
-  // dalam format ISO yang dimengerti Adafruit IO
-  function dayRangeISO(dateStr) {
-    const start = new Date(`${dateStr}T00:00:00`);
-    const end = new Date(`${dateStr}T23:59:59`);
-    return { startISO: start.toISOString(), endISO: end.toISOString() };
+  // Downsample: kalau titik data jauh lebih banyak dari yang mau digambar,
+  // pecah jadi beberapa "bucket" berurutan waktu lalu ambil satu nilai
+  // representatif per bucket.
+  // mode 'avg'  -> rata-rata per bucket, cocok untuk V/I/P/PF/Freq (meredam noise)
+  // mode 'last' -> nilai terakhir per bucket, wajib untuk energi karena itu
+  //                angka kumulatif (rata-rata akan salah/menyesatkan)
+  function downsample(points, maxPoints, mode) {
+    if (points.length <= maxPoints) return points;
+
+    const bucketSize = Math.ceil(points.length / maxPoints);
+    const result = [];
+
+    for (let i = 0; i < points.length; i += bucketSize) {
+      const bucket = points.slice(i, i + bucketSize);
+      if (mode === 'last') {
+        result.push(bucket[bucket.length - 1]);
+      } else {
+        const avgV = bucket.reduce((sum, p) => sum + p.v, 0) / bucket.length;
+        // Waktu bucket diwakili oleh titik tengah supaya sumbu waktu tetap proporsional
+        const midT = bucket[Math.floor(bucket.length / 2)].t;
+        result.push({ t: midT, v: avgV });
+      }
+    }
+    return result;
   }
 
   async function openHistory(feed) {
     historyModal.hidden = false;
-    historyBody.innerHTML = '<div class="modal-loading">Memuat riwayat...</div>';
-
-    if (!historyDateInput.value) {
-      historyDateInput.value = todayLocalDateStr();
-    }
-    const { startISO, endISO } = dayRangeISO(historyDateInput.value);
+    historyBody.innerHTML = '<div class="modal-loading">Memuat riwayat (halaman 1)...</div>';
 
     try {
-      const url = `/api/feed?feed=${feed}&limit=1000&start_time=${encodeURIComponent(startISO)}&end_time=${encodeURIComponent(endISO)}`;
-      const res = await fetch(url);
-      const rows = await res.json();
+      const rows = await fetchAllHistory(feed, (page, countSoFar) => {
+        historyBody.innerHTML = `<div class="modal-loading">Memuat riwayat (halaman ${page}, ${countSoFar} baris terkumpul)...</div>`;
+      });
 
       if (!Array.isArray(rows) || rows.length === 0) {
         const pesan = feed === 'jalur-b'
-          ? 'Belum ada data untuk Jalur B pada tanggal ini. Pastikan sensor kedua sudah aktif.'
-          : 'Tidak ada data pada tanggal yang dipilih.';
+          ? 'Belum ada data untuk Jalur B. Pastikan sensor kedua sudah aktif.'
+          : 'Belum ada data yang tersimpan untuk feed ini.';
         historyBody.innerHTML = `<div class="modal-loading">${pesan}</div>`;
         return;
       }
@@ -722,18 +815,27 @@
         .filter(p => p !== null)
         .reverse();
 
+      const earliestTime = parsed[0].time;
+      const latestTime = parsed[parsed.length - 1].time;
+      historyHintEl.textContent =
+        `${parsed.length} titik data, dari ${fmtDateTime(earliestTime)} s.d. ${fmtDateTime(latestTime)}`;
+
       let html = '<div class="modal-charts">';
       const interactiveCharts = [];
       METRIC_DEFS.forEach(def => {
-        const points = parsed
+        const rawPoints = parsed
           .map(p => ({ t: p.time, v: p.data[def.key] }))
           .filter(p => typeof p.v === 'number');
 
-        if (points.length === 0) return;
+        if (rawPoints.length === 0) return;
+
+        // Energi itu kumulatif -> downsample harus ambil nilai TERAKHIR per
+        // bucket, bukan rata-rata, supaya trennya tetap benar (selalu naik).
+        const points = downsample(rawPoints, MAX_CHART_POINTS, def.key === 'energy' ? 'last' : 'avg');
 
         const values = points.map(p => p.v);
-        const latestVal = values[values.length - 1];
-        const rangeText = `${fmtTimeOnly(points[0].t)} s.d. ${fmtTimeOnly(points[points.length - 1].t)}`;
+        const latestVal = rawPoints[rawPoints.length - 1].v; // nilai asli terakhir, bukan hasil downsample
+        const rangeText = `${fmtDateTime(points[0].t)} s.d. ${fmtDateTime(points[points.length - 1].t)}`;
         const coords = buildCoords(values, 300, 56);
         interactiveCharts.push({ coords, points, decimals: def.decimals, unit: def.unit });
 
@@ -755,11 +857,7 @@
       svgEls.forEach((svgEl, i) => {
         const chartData = interactiveCharts[i];
         if (!chartData) return;
-        bindChartHover(
-          svgEl,
-          () => ({ coords: chartData.coords, points: chartData.points }),
-          { decimals: chartData.decimals, unit: chartData.unit }
-        );
+        bindChartHover(svgEl, () => chartData);
       });
     } catch (err) {
       console.error(err);
