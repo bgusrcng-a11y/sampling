@@ -564,7 +564,7 @@
   // Kalau data terbaru di Adafruit IO sudah lebih tua dari ini, berarti
   // ESP32-nya sendiri yang mati (bukan cuma sensor PZEM-nya).
   // Sesuaikan dengan interval publish kamu - idealnya sekitar 2-3x interval publish.
-  const ESP_OFFLINE_THRESHOLD_MS = 5000;
+  const ESP_OFFLINE_THRESHOLD_MS = 10000;
 
   function setModuleStatus(isOn) {
     const modStatusEl = document.getElementById('a-modstatus');
