@@ -13,9 +13,16 @@ export default async function handler(req, res) {
 
   const feed = req.query.feed || "jalur-a";
   const limit = req.query.limit || 30;
+  const startTime = req.query.start_time;
+  const endTime = req.query.end_time;
 
   try {
-    const url = `https://io.adafruit.com/api/v2/${AIO_USERNAME}/feeds/${feed}/data?limit=${limit}`;
+    const params = new URLSearchParams();
+    params.set("limit", limit);
+    if (startTime) params.set("start_time", startTime);
+    if (endTime) params.set("end_time", endTime);
+
+    const url = `https://io.adafruit.com/api/v2/${AIO_USERNAME}/feeds/${feed}/data?${params.toString()}`;
     const response = await fetch(url, {
       headers: { "X-AIO-Key": AIO_KEY }
     });
