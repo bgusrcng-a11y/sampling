@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Electric Dashboard</title>
+<title>Monitor Daya PZEM</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
@@ -415,7 +415,7 @@
       <div class="panel" id="panelA">
         <div class="panel-head">
           <div class="panel-title">
-            <h2>Line A</h2>
+            <h2>Jalur A</h2>
             <span class="mod-status" id="a-modstatus">
               <span class="dot"></span>
               <span id="a-modstatus-text">Memuat...</span>
@@ -461,7 +461,7 @@
       <div class="panel" id="panelB">
         <div class="panel-head">
           <div class="panel-title">
-            <h2>Line B</h2>
+            <h2>Jalur B</h2>
             <span class="mod-status" id="b-modstatus">
               <span class="dot"></span>
               <span id="b-modstatus-text">Memuat...</span>
@@ -508,7 +508,7 @@
     <footer>
       <div>Source: <span class="ink">MQTT</span></div>
       <div>Last Update: <span class="ink" id="lastUpdate">–</span></div>
-      <div>Interval: <span class="ink">5s</span></div>
+      <div>Interval polling: <span class="ink">5s</span></div>
     </footer>
   </div>
 
@@ -516,8 +516,8 @@
     <div class="modal">
       <div class="modal-head">
         <div class="tabs">
-          <button class="tab-btn active" id="tabA" data-feed="jalur-a">Line A</button>
-          <button class="tab-btn" id="tabB" data-feed="jalur-b">Line B</button>
+          <button class="tab-btn active" id="tabA" data-feed="jalur-a">Jalur A</button>
+          <button class="tab-btn" id="tabB" data-feed="jalur-b">Jalur B</button>
         </div>
         <button class="btn-close" id="closeHistory">Tutup</button>
       </div>
@@ -642,7 +642,7 @@
   // Kalau data terbaru di Adafruit IO sudah lebih tua dari ini, berarti
   // ESP32-nya sendiri yang mati (bukan cuma sensor PZEM-nya).
   // Sesuaikan dengan interval publish kamu - idealnya sekitar 2-3x interval publish.
-  const ESP_OFFLINE_THRESHOLD_MS = 10000;
+  const ESP_OFFLINE_THRESHOLD_MS = 20000;
 
   function setModuleStatus(jalurKey, isOn) {
     const modStatusEl = document.getElementById(`${jalurKey}-modstatus`);
@@ -775,7 +775,7 @@
   const tabA = document.getElementById('tabA');
   const tabB = document.getElementById('tabB');
   const loadHistoryBtn = document.getElementById('loadHistoryBtn');
-  let currentFeed = 'line-a';
+  let currentFeed = 'jalur-a';
 
   // Batas jumlah row per request ke Adafruit IO REST API. Menurut dokumentasi
   // resmi, limit maksimum yang bisa diminta eksplisit per request adalah 1000
@@ -812,7 +812,7 @@
       if (onProgress) onProgress(page, allRows.length);
 
       const res = await fetch(url);
-      if (!res.ok) throw new Error(`Server merespons status ${res.status}`);
+      if (!res.ok) throw new Error(`Adafruit IO merespons status ${res.status}`);
 
       if (page === 1) {
         const totalHeader = res.headers.get('x-pagination-total');
@@ -967,7 +967,7 @@
 
       if (!Array.isArray(rows) || rows.length === 0) {
         const pesan = feed === 'jalur-b'
-          ? 'Belum ada data untuk line B. Pastikan sensor kedua sudah aktif.'
+          ? 'Belum ada data untuk Jalur B. Pastikan sensor kedua sudah aktif.'
           : 'Belum ada data yang tersimpan untuk feed ini.';
         historyBody.innerHTML = `<div class="modal-loading">${pesan}</div>`;
         return;
@@ -989,7 +989,7 @@
       // Adafruit IO (dari header X-Pagination-Total). Kalau beda, tampilkan
       // peringatan supaya jelas ini beda kasus dengan "memang cuma segitu datanya".
       if (reportedTotal !== null && !Number.isNaN(reportedTotal) && reportedTotal > parsed.length) {
-        historyHintEl.textContent = `Data total ${reportedTotal} titik untuk ini — ada ${reportedTotal - parsed.length} titik yang belum termuat, coba muat ulang.`;
+        historyHintEl.textContent = `Adafruit IO melaporkan total ${reportedTotal} titik untuk feed ini — ada ${reportedTotal - parsed.length} titik yang belum termuat, coba muat ulang.`;
       }
 
       applyDateFilter(); // render sesuai pilihan dropdown saat ini (default: semua tanggal)
@@ -1001,15 +1001,15 @@
 
   function switchTab(feed) {
     currentFeed = feed;
-    tabA.classList.toggle('active', feed === 'line-a');
-    tabB.classList.toggle('active', feed === 'line-b');
+    tabA.classList.toggle('active', feed === 'jalur-a');
+    tabB.classList.toggle('active', feed === 'jalur-b');
     openHistory(feed);
   }
 
   document.getElementById('historyBtn').addEventListener('click', () => openHistory(currentFeed));
   loadHistoryBtn.addEventListener('click', () => openHistory(currentFeed));
-  tabA.addEventListener('click', () => switchTab('line-a'));
-  tabB.addEventListener('click', () => switchTab('line-b'));
+  tabA.addEventListener('click', () => switchTab('jalur-a'));
+  tabB.addEventListener('click', () => switchTab('jalur-b'));
   document.getElementById('closeHistory').addEventListener('click', () => { historyModal.hidden = true; });
   historyModal.addEventListener('click', (e) => { if (e.target === historyModal) historyModal.hidden = true; });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') historyModal.hidden = true; });
